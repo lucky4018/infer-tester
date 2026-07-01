@@ -1,0 +1,284 @@
+{
+  "timestamp": "2026-07-01T07:16:09Z",
+  "server": "http://192.168.0.190:8100",
+  "model": "qwen",
+  "duration": "3m39.383s",
+  "summary": {
+    "total": 37,
+    "passed": 30,
+    "failed": 0,
+    "skipped": 7
+  },
+  "suites": [
+    {
+      "name": "smoke",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "cases": [
+        {
+          "name": "basic_inference",
+          "status": "PASS",
+          "duration_ms": 1641,
+          "detail": "output: \"! Can you please give me a short summary of\""
+        }
+      ]
+    },
+    {
+      "name": "api",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 5,
+      "cases": [
+        {
+          "name": "openai_completions_fields",
+          "status": "PASS",
+          "duration_ms": 1309,
+          "detail": "all required fields present"
+        },
+        {
+          "name": "openai_chat_roles",
+          "status": "PASS",
+          "duration_ms": 344,
+          "detail": "role=assistant content=\"Yes\""
+        },
+        {
+          "name": "openai_models_list",
+          "status": "PASS",
+          "duration_ms": 9,
+          "detail": "1 model(s) listed"
+        },
+        {
+          "name": "openai_streaming_chunks",
+          "status": "PASS",
+          "duration_ms": 2109,
+          "detail": "13 chunks received"
+        },
+        {
+          "name": "openai_streaming_done_signal",
+          "status": "PASS",
+          "duration_ms": 1757,
+          "detail": "stream ends with [DONE]"
+        },
+        {
+          "name": "openai_error_format",
+          "status": "SKIP",
+          "duration_ms": 2596,
+          "detail": "server has a default model configured, missing model param returns 200"
+        },
+        {
+          "name": "openai_embeddings",
+          "status": "SKIP",
+          "duration_ms": 8,
+          "detail": "model does not support embeddings"
+        },
+        {
+          "name": "openai_rerank",
+          "status": "SKIP",
+          "duration_ms": 8,
+          "detail": "model does not support rerank"
+        },
+        {
+          "name": "anthropic_messages_basic",
+          "status": "PASS",
+          "duration_ms": 1954,
+          "detail": "input_tokens=10 output_tokens=12"
+        },
+        {
+          "name": "anthropic_count_tokens",
+          "status": "PASS",
+          "duration_ms": 12,
+          "detail": "input_tokens=14"
+        },
+        {
+          "name": "anthropic_streaming_events",
+          "status": "PASS",
+          "duration_ms": 2080,
+          "detail": "event types: map[content_block_delta:10 content_block_start:1 content_block_stop:1 message_delta:1 message_start:1 message_stop:1]"
+        },
+        {
+          "name": "anthropic_tool_use",
+          "status": "SKIP",
+          "duration_ms": 11,
+          "detail": "model does not support tool calling"
+        },
+        {
+          "name": "common_health",
+          "status": "PASS",
+          "duration_ms": 7,
+          "detail": "OK"
+        },
+        {
+          "name": "common_ping",
+          "status": "PASS",
+          "duration_ms": 6,
+          "detail": "OK"
+        },
+        {
+          "name": "common_tokenize_roundtrip",
+          "status": "PASS",
+          "duration_ms": 20,
+          "detail": "4 tokens, round-trip OK"
+        },
+        {
+          "name": "common_metrics_prometheus",
+          "status": "PASS",
+          "duration_ms": 36,
+          "detail": "key metrics present (56716 bytes)"
+        },
+        {
+          "name": "common_error_response_format",
+          "status": "SKIP",
+          "duration_ms": 2666,
+          "detail": "server has a default model configured, missing model param returns 200"
+        },
+        {
+          "name": "cross_compat_output_consistency",
+          "status": "PASS",
+          "duration_ms": 844,
+          "detail": "openai=\"2\" anthropic=\"2\""
+        }
+      ]
+    },
+    {
+      "name": "sampling",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "cases": [
+        {
+          "name": "determinism_same_seed",
+          "status": "PASS",
+          "duration_ms": 3429,
+          "detail": "identical output \" Paris, which is also the most populous city in\""
+        },
+        {
+          "name": "temperature_zero_greedy",
+          "status": "PASS",
+          "duration_ms": 836,
+          "detail": "output=\"2, 2\""
+        },
+        {
+          "name": "max_tokens_respected",
+          "status": "PASS",
+          "duration_ms": 848,
+          "detail": "completion_tokens=5 finish_reason=length"
+        },
+        {
+          "name": "stop_sequence_honored",
+          "status": "PASS",
+          "duration_ms": 3639,
+          "detail": "finish_reason=stop text=\".\\n\\nOne, two, three, four, five, six, seven, eight, nine, ten. \""
+        }
+      ]
+    },
+    {
+      "name": "features",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 2,
+      "cases": [
+        {
+          "name": "structured_output_json_schema",
+          "status": "PASS",
+          "duration_ms": 3144,
+          "detail": "valid JSON: {\"name\": \"Lionel Messi\", \"score\": 98}"
+        },
+        {
+          "name": "tool_calling_openai",
+          "status": "SKIP",
+          "duration_ms": 9,
+          "detail": "model does not support tool calling"
+        },
+        {
+          "name": "prefix_caching_kv_reuse",
+          "status": "PASS",
+          "duration_ms": 3405,
+          "detail": "prefix caching active (cached_tokens field not exposed)"
+        },
+        {
+          "name": "reasoning_thinking",
+          "status": "SKIP",
+          "duration_ms": 32088,
+          "detail": "model does not support thinking mode"
+        },
+        {
+          "name": "multimodal_image",
+          "status": "PASS",
+          "duration_ms": 520,
+          "detail": "vision response: \"Green\""
+        }
+      ]
+    },
+    {
+      "name": "performance",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "cases": [
+        {
+          "name": "latency_ttft",
+          "status": "PASS",
+          "duration_ms": 41200,
+          "detail": "n=5 avg=208ms min=175ms max=325ms"
+        },
+        {
+          "name": "throughput_tokens",
+          "status": "PASS",
+          "duration_ms": 21380,
+          "detail": "duration=15s concurrency=4 completed=4 failed=0 total_tokens=512 throughput=34.1 tok/s"
+        },
+        {
+          "name": "latency_single_request",
+          "status": "PASS",
+          "duration_ms": 40435,
+          "detail": "n=5 avg=8.087s min=8.026s max=8.183s"
+        },
+        {
+          "name": "prefix_caching_speedup",
+          "status": "PASS",
+          "duration_ms": 2496,
+          "detail": "cold=828ms warm=838ms speedup=-1.3%"
+        },
+        {
+          "name": "batch_scaling",
+          "status": "PASS",
+          "duration_ms": 16324,
+          "detail": "batch=1 dur=5.246s tok/s=6.1  batch=2 dur=5.575s tok/s=11.5  batch=4 dur=5.504s tok/s=23.3"
+        }
+      ]
+    },
+    {
+      "name": "concurrency",
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "cases": [
+        {
+          "name": "concurrent_requests",
+          "status": "PASS",
+          "duration_ms": 3610,
+          "detail": "n=16 all succeeded in 3.61s"
+        },
+        {
+          "name": "continuous_batching_mixed",
+          "status": "PASS",
+          "duration_ms": 24421,
+          "detail": "7 mixed jobs all completed in 24.421s"
+        },
+        {
+          "name": "preemption_short_wins",
+          "status": "PASS",
+          "duration_ms": 1141,
+          "detail": "4/4 short requests done in 1.09s"
+        },
+        {
+          "name": "cancellation_mid_stream",
+          "status": "PASS",
+          "duration_ms": 3000,
+          "detail": "cancelled cleanly after 16 events"
+        }
+      ]
+    }
+  ]
+}

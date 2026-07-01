@@ -1,0 +1,72 @@
+{
+  "server": {
+    "base_url": "http://192.168.0.190:8100",
+    "api_key": "EMPTY",
+    "timeout_seconds": 120
+  },
+  "model": {
+    "name": "qwen"
+  },
+  "performance": {
+    "latency_requests": 5,
+    "throughput_duration_seconds": 15
+  },
+  "concurrency": {
+    "num_requests": 16
+  },
+  "cases": {
+    "smoke": {
+      "basic_inference": true
+    },
+    "api": {
+      "openai_completions_fields": true,
+      "openai_chat_roles": true,
+      "openai_models_list": true,
+      "openai_streaming_chunks": true,
+      "openai_streaming_done_signal": true,
+      "openai_error_format": true,
+      "openai_embeddings": true,
+      "openai_rerank": true,
+      "anthropic_messages_basic": true,
+      "anthropic_count_tokens": true,
+      "anthropic_streaming_events": true,
+      "anthropic_tool_use": true,
+      "common_health": true,
+      "common_ping": true,
+      "common_tokenize_roundtrip": true,
+      "common_metrics_prometheus": true,
+      "common_error_response_format": true,
+      "cross_compat_output_consistency": true
+    },
+    "sampling": {
+      "determinism_same_seed": true,
+      "temperature_zero_greedy": true,
+      "max_tokens_respected": true,
+      "stop_sequence_honored": true
+    },
+    "features": {
+      "structured_output_json_schema": true,
+      "tool_calling_openai": true,
+      "prefix_caching_kv_reuse": true,
+      "reasoning_thinking": true,
+      "multimodal_image": true
+    },
+    "performance": {
+      "latency_ttft": true,
+      "throughput_tokens": true,
+      "latency_single_request": true,
+      "prefix_caching_speedup": true,
+      "batch_scaling": true
+    },
+    "concurrency": {
+      "concurrent_requests": true,
+      "continuous_batching_mixed": true,
+      "preemption_short_wins": true,
+      "cancellation_mid_stream": true
+    }
+  },
+  "output": {
+    "report_file": "report.md",
+    "verbose": true
+  }
+}
