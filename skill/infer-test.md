@@ -33,9 +33,10 @@
    ```
 
 5. 分析报告，关注以下内容：
-   - ❌ 失败用例：逐条说明失败原因和可能的修复方向
+   - ❓ 失败用例：逐条说明失败原因和可能的修复方向
    - ⏭ 跳过用例：确认跳过原因是否符合预期（能力不支持 vs 服务异常）
-   - performance 套件：解读 TTFT、tokens/s、batch_scaling 数值，给出性能评价
+   - 轻量性能度量：解读 TTFT、throughput_tokens、prefix_caching_speedup 数值
+   - 饱和压测：解读 bench_serving / vllm_bench_serve 的 tok/s、TTFT/TPOT/ITL P50/P90/P99，评估是否达到硬件性能基线
    - 整体结论：服务是否可以上线，有哪些注意事项
 
 ## 常用选项

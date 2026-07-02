@@ -68,6 +68,7 @@ func main() {
 	r.Add(suite.API(c, cfg))
 	r.Add(suite.Sampling(c, cfg))
 	r.Add(suite.Features(c, cfg))
+	r.Add(suite.VllmBench(c, cfg))
 	r.Add(suite.Performance(c, cfg))
 	r.Add(suite.Concurrency(c, cfg))
 

@@ -27,12 +27,13 @@ go.work.sum
 # env file
 .qoder/
 
-# Build output (binaries committed via build.sh)
-dist/infer-tester-*
+# Build output
+dist/
 
 # Test reports
 report.json
 report.md
+tmp/
 
 # OS files
 .DS_Store
@@ -41,3 +42,6 @@ Thumbs.db
 # Editor/IDE
 .idea/
 .vscode/
+
+# Skills containing credentials (local only, do not commit)
+skill/ssh-test-machine.md

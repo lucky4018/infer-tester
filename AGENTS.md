@@ -317,5 +317,37 @@ windows/amd64 windows/arm64
 
 ```
 skill/
-  infer-test.md   # 测试执行与报告分析的完整操作指南
+  infer-test.md         # 测试执行与报告分析的完整操作指南
+  ssh-test-machine.md   # 测试机 SSH 连接（含凭据，已加入 .gitignore，不提交）
+```
+
+---
+
+## Skill：ssh-test-machine
+
+`skill/ssh-test-machine.md` 包含测试机的 SSH 连接信息，供模型在需要远程操作时使用。
+
+> **注意：该文件含有凭据，已在 `.gitignore` 中排除，不会提交到版本库。**
+
+### 测试机信息
+
+| 项目 | 值 |
+|---|---|
+| IP | 192.168.0.190 |
+| 用户名 | root |
+| 临时目录 | /root/wangyu |
+
+### 作用
+
+模型读取该文件后可自主完成：
+
+1. SSH 登录测试机执行远程命令
+2. 用 `scp` 上传 Linux 二进制和配置到 `/root/wangyu`
+3. 在测试机上就地运行 `infer-tester-linux-amd64`
+4. 取回 `report.md` 到本地分析
+
+### 调用示例
+
+```
+请参考 skill/ssh-test-machine.md，把 Linux 版本的 infer-tester 上传到测试机并运行，取回报告后分析。
 ```

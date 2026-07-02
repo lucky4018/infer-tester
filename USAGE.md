@@ -55,9 +55,18 @@ cat report.md
   "model": {
     "name": "Qwen/Qwen2.5-7B-Instruct"
   },
+  "vllm_bench": {
+    "image": "vllm-ascend:v0.20.2rc",
+    "args": "--backend openai-chat --endpoint /v1/chat/completions --dataset-name random --num-prompts 200 --random-input-len 512 --random-output-len 128 --ignore-eos",
+    "tokenizer": "/home/la/work/vllm-project/models/Eco-Tech/Qwen3___5-35B-A3B-w8a8-mtp",
+    "model_dir": "/home/la/work/vllm-project/models"
+  },
   "performance": {
     "latency_requests": 5,
-    "throughput_duration_seconds": 15
+    "throughput_duration_seconds": 15,
+    "bench_num_prompts": 100,
+    "bench_input_len": 512,
+    "bench_output_len": 128
   },
   "concurrency": {
     "num_requests": 16
@@ -99,18 +108,21 @@ cat report.md
       "reasoning_thinking": true,
       "multimodal_image": true
     },
-    "performance": {
-      "latency_ttft": true,
-      "throughput_tokens": true,
-      "latency_single_request": true,
-      "prefix_caching_speedup": true,
-      "batch_scaling": true
-    },
     "concurrency": {
       "concurrent_requests": true,
       "continuous_batching_mixed": true,
       "preemption_short_wins": true,
       "cancellation_mid_stream": true
+    },
+    "performance": {
+      "latency_ttft": true,
+      "throughput_tokens": true,
+      "latency_single_request": true,
+      "prefix_caching_speedup": true,
+      "bench_serving": true
+    },
+    "vllm_bench": {
+      "vllm_bench_serve": true
     }
   },
   "output": {
@@ -134,7 +146,58 @@ cat report.md
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|:---:|---|
-| `name` | string | ✅ | 模型 ID，需与推理引擎启动时 `--model` 参数一致 |
+| `name` | string | | 模型 ID，需与推理引擎启动时 `--model` 参数一致。留空时自动从 `/v1/models` 获取第一个可用模型 |
+
+#### `vllm_bench`
+
+vLLM 官方 bench serve 压测配置，通过 Docker 容器调用。整个字段可以不配，不配时该用例自动跳过。
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|:---:|---|---|
+| `image` | string | | 自动检测 | Docker 镜像名。留空时自动检测宿主机上第一个含 `vllm` 的镜像 |
+| `args` | string | | `""` | 透传给 bench serve 的参数。`--host/--port/--model/--request-rate` 由程序自动注入，不需配置 |
+| `tokenizer` | string | | `""` | tokenizer 路径或 HuggingFace repo id。非标准模型名时必填，否则 bench serve 无法加载 tokenizer |
+| `model_dir` | string | | `""` | 宿主机模型目录根路径，挂载到容器内 `/mnt/models` 供 tokenizer 加载 |
+
+**如何获取 `tokenizer` 和 `model_dir` 的值？**
+
+这两个参数解决一个常见问题：当服务端模型名是本地路径（如 `/models/Org/MyModel`）而非 HuggingFace repo id 时，vLLM bench serve 无法自动下载 tokenizer，需要将宿主机上的模型目录挂载进 Docker 容器。
+
+在**测试机**上执行以下命令获取这两个值：
+
+```bash
+# 1. 查看 vLLM 服务启动参数，找到 --model 指向的路径
+docker inspect --format '{{.Args}}' <vllm容器名>
+# 或者查看进程参数
+ps aux | grep vllm | grep -- --model
+
+# 2. 查看服务返回的模型名
+curl -s http://127.0.0.1:8000/v1/models | python3 -m json.tool
+# 输出示例: "id": "/home/la/work/vllm-project/models/Eco-Tech/Qwen3___5-35B-A3B-w8a8-mtp"
+
+# 3. 确认模型目录下有 tokenizer 文件
+ls /home/la/work/vllm-project/models/Eco-Tech/Qwen3___5-35B-A3B-w8a8-mtp/tokenizer*
+# 应能看到 tokenizer.json 或 tokenizer_config.json
+```
+
+配置规则：
+- `tokenizer`：填写模型目录的**完整路径**（即含 tokenizer 文件的目录）
+- `model_dir`：填写 `tokenizer` 路径的**父级根目录**，程序会将它挂载到容器内，并自动转换 tokenizer 路径为容器内路径
+
+示例：
+```
+宿主机模型路径: /home/la/work/vllm-project/models/Eco-Tech/Qwen3___5-35B-A3B-w8a8-mtp
+
+配置:
+  tokenizer = "/home/la/work/vllm-project/models/Eco-Tech/Qwen3___5-35B-A3B-w8a8-mtp"
+  model_dir = "/home/la/work/vllm-project/models"
+
+运行时自动转换:
+  docker -v /home/la/work/vllm-project/models:/mnt/models ...
+  --tokenizer /mnt/models/Eco-Tech/Qwen3___5-35B-A3B-w8a8-mtp
+```
+
+如果模型名本身是标准 HuggingFace repo id（如 `Qwen/Qwen2.5-7B-Instruct`），则无需配置这两个字段，bench serve 会自动从 HuggingFace 下载 tokenizer。
 
 #### `performance`
 
@@ -142,6 +205,10 @@ cat report.md
 |---|---|---|---|
 | `latency_requests` | int | `10` | 延迟测试发送的串行请求次数 |
 | `throughput_duration_seconds` | int | `30` | 吞吐测试持续时间（秒） |
+| `bench_num_prompts` | int | `100` | 饱和压测（bench_serving）每轮总请求数 |
+| `bench_request_rate` | float | `0` | bench_serving 的固定请求速率（req/s）。为 0 时使用自适应并发探测模式 |
+| `bench_input_len` | int | `512` | 饱和压测随机输入长度（token 数） |
+| `bench_output_len` | int | `128` | 饱和压测随机输出长度（token 数） |
 
 #### `concurrency`
 
@@ -151,7 +218,7 @@ cat report.md
 
 #### `cases`
 
-全部 36 个用例的开关，按 suite 分组，`true` 启用，`false` 禁用。未出现在配置中的用例默认启用。
+全部 38 个用例的开关，按 suite 分组，`true` 启用，`false` 禁用。未出现在配置中的用例默认启用。
 
 全部用例默认启用。模型不支持某项能力时，将对应用例改为 `false` 即可：
 
@@ -208,7 +275,7 @@ cat report.md
 
 ## 测试套件
 
-共 6 个套件、36 个用例。运行 `-list` 可查看完整列表及每条用例的说明。
+共 7 个套件、38 个用例。运行 `-list` 可查看完整列表及每条用例的说明。
 
 ### smoke — 冒烟测试
 
@@ -276,7 +343,7 @@ cat report.md
 | `throughput_tokens` | 4 并发持续 N 秒，统计输出 token 总数和平均 tokens/s 吞吐量 |
 | `latency_single_request` | 串行发送 N 次请求，统计端到端平均/最小/最大延迟 |
 | `prefix_caching_speedup` | 对比冷热前缀请求耗时，量化 KV 缓存带来的延迟加速比 |
-| `batch_scaling` | batch=1/2/4 并发，观察 tokens/s 随批大小的变化趋势 |
+| `bench_serving` | 自适应并发饱和压测：阶梯式探测最优并发度 → 正式压测，输出 TTFT/TPOT/ITL 的 P50/P90/P99 及 tok/s |
 
 ### concurrency — 并发与调度测试
 
@@ -288,6 +355,14 @@ cat report.md
 | `continuous_batching_mixed` | 混合短请求(5 token)和长请求(150 token)并发，验证短请求不被长请求饿死 |
 | `preemption_short_wins` | 先发长请求，50ms 后发 4 个短请求，验证短请求能正常完成不被阻塞 |
 | `cancellation_mid_stream` | 流式请求中途取消，验证连接正常关闭，服务端不 hang 不报错 |
+
+### vllm_bench — vLLM 官方压测
+
+通过 Docker 容器调用 vLLM 官方 `benchmark_serving.py` 工具，将 GPU/NPU 压至饱和状态，测量最大吞吐性能。需要安装 Docker 且当前用户有权限访问 daemon。未配置 `vllm_bench` 字段时自动跳过。
+
+| 用例 | 说明 |
+|---|---|
+| `vllm_bench_serve` | 阶梯式探测最优请求速率（Poisson 流量模型），找到吞吐量拐点后取稳定值作为性能基线 |
 
 ---
 
@@ -330,7 +405,7 @@ cat report.md
 在 `config.json` 中将对应用例改为 `false`，例如不跑性能测试中的吞吐测试：
 
 ```json
-"throughput_sustained": false
+"throughput_tokens": false
 ```
 
 **启用多模态测试**

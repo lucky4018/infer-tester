@@ -104,6 +104,90 @@ func (c *Client) JsonGet(ctx context.Context, path string, out any) error {
 	return json.Unmarshal(r.Body, out)
 }
 
+// BenchRecord holds per-request streaming timing data for benchmark analysis.
+type BenchRecord struct {
+	TTFT       time.Duration   // time from request start to first content token
+	ChunkTimes []time.Duration // elapsed time of each content chunk from request start
+	NumTokens  int             // completion tokens (from usage field if available, else chunk count)
+	Total      time.Duration   // total request duration
+}
+
+// StreamBench sends a streaming chat request and records per-token timestamps for TTFT/TPOT/ITL analysis.
+func (c *Client) StreamBench(ctx context.Context, path string, body any) (BenchRecord, error) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return BenchRecord{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(b))
+	if err != nil {
+		return BenchRecord{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	t0 := time.Now()
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return BenchRecord{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return BenchRecord{}, fmt.Errorf("status=%d body=%s", resp.StatusCode, raw)
+	}
+
+	var rec BenchRecord
+	var usageTokens int
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			break
+		}
+		elapsed := time.Since(t0)
+
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+			Usage *struct {
+				CompletionTokens int `json:"completion_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+		if chunk.Usage != nil && chunk.Usage.CompletionTokens > 0 {
+			usageTokens = chunk.Usage.CompletionTokens
+		}
+		// Skip chunks without content (role chunk, usage-only chunk)
+		if len(chunk.Choices) == 0 || chunk.Choices[0].Delta.Content == "" {
+			continue
+		}
+		if rec.TTFT == 0 {
+			rec.TTFT = elapsed
+		}
+		rec.ChunkTimes = append(rec.ChunkTimes, elapsed)
+	}
+	rec.Total = time.Since(t0)
+	if usageTokens > 0 {
+		rec.NumTokens = usageTokens
+	} else {
+		rec.NumTokens = len(rec.ChunkTimes)
+	}
+	return rec, scanner.Err()
+}
+
 // ResolveModelName queries /v1/models and returns the ID of the first available model.
 func (c *Client) ResolveModelName(ctx context.Context) (string, error) {
 	var r struct {

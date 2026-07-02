@@ -3,6 +3,8 @@ package suite
 import (
 	"context"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +13,42 @@ import (
 	"infer-tester/internal/config"
 	"infer-tester/internal/runner"
 )
+
+// benchStatLine formats mean/p50/p90/p99 from a slice of float64 (milliseconds).
+func benchStatLine(data []float64) string {
+	if len(data) == 0 {
+		return "n/a"
+	}
+	sorted := make([]float64, len(data))
+	copy(sorted, data)
+	sort.Float64s(sorted)
+	n := len(sorted)
+	pct := func(p float64) float64 {
+		idx := int(math.Ceil(p/100*float64(n))) - 1
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= n {
+			idx = n - 1
+		}
+		return sorted[idx]
+	}
+	sum := 0.0
+	for _, v := range sorted {
+		sum += v
+	}
+	return fmt.Sprintf("mean=%.1f p50=%.1f p90=%.1f p99=%.1f", sum/float64(n), pct(50), pct(90), pct(99))
+}
+
+// makeBenchPrompt generates a prompt of approximately targetTokens tokens (heuristic: 4 chars/token).
+func makeBenchPrompt(targetTokens int) string {
+	base := "In the field of artificial intelligence and machine learning, researchers continue to develop sophisticated models capable of understanding and generating human language with remarkable accuracy. These systems have found applications in healthcare diagnostics, educational tutoring, scientific research, and creative industries. The rapid advancement of large language models raises important questions about safety, alignment, and the future relationship between humans and intelligent machines. Engineers and scientists work to ensure these powerful tools remain beneficial and controllable. "
+	target := targetTokens * 4
+	for len(base) < target {
+		base += base
+	}
+	return base[:target]
+}
 
 func Performance(c *client.Client, cfg *config.Config) runner.Suite {
 	return runner.Suite{
@@ -21,7 +59,7 @@ func Performance(c *client.Client, cfg *config.Config) runner.Suite {
 			perfTokenThroughput(c, cfg),
 			perfLatency(c, cfg),
 			perfPrefixCachingSpeedup(c, cfg),
-			perfBatchScaling(c, cfg),
+			perfBenchServing(c, cfg),
 		},
 	}
 }
@@ -172,55 +210,247 @@ func perfPrefixCachingSpeedup(c *client.Client, cfg *config.Config) runner.TestC
 	}}
 }
 
-func perfBatchScaling(c *client.Client, cfg *config.Config) runner.TestCase {
-	return runner.TestCase{Name: "batch_scaling", Description: "batch=1/2/4 并发，观察 tokens/s 随批大小的变化趋势", Run: func() (string, error) {
-		type result struct {
-			batch    int
-			dur      time.Duration
-			tokensPS float64
-		}
-		var results []result
 
-		for _, batchSize := range []int{1, 2, 4} {
-			t0 := time.Now()
+func perfBenchServing(c *client.Client, cfg *config.Config) runner.TestCase {
+	return runner.TestCase{
+		Name:        "bench_serving",
+		Description: "自适应并发压测：检测 vLLM 配置 → 阶梯式探测最优并发 → 正式测试",
+		Run: func() (string, error) {
+			// 1. 检测 vLLM 运行时配置
+			vllmCfg := detectVllmConfig(c)
+			cfgStr := ""
+			if vllmCfg != nil {
+				cfgStr = fmt.Sprintf("vllm{gpu_mem=%s kv_blocks=%s prefix_cache=%s} | ",
+					vllmCfg.GpuMemoryUtilization, vllmCfg.NumGpuBlocks, vllmCfg.EnablePrefixCaching)
+				fmt.Printf("  [bench_serving] vLLM config: gpu_mem=%s kv_blocks=%s prefix_cache=%s\n",
+					vllmCfg.GpuMemoryUtilization, vllmCfg.NumGpuBlocks, vllmCfg.EnablePrefixCaching)
+			}
+
+			n := cfg.Performance.BenchNumPrompts
+			if n <= 0 {
+				n = 100
+			}
+			inputLen := cfg.Performance.BenchInputLen
+			if inputLen <= 0 {
+				inputLen = 512
+			}
+			outputLen := cfg.Performance.BenchOutputLen
+			if outputLen <= 0 {
+				outputLen = 128
+			}
+			prompt := makeBenchPrompt(inputLen)
+
+			// 2. 阶梯式探测最优并发度
+			probeLevels := []int{8, 16, 32, 64, 128, 256}
+			type probeResult struct {
+				concurrency int
+				tokPS       float64
+			}
+			var probeResults []probeResult
+			bestConcurrency := 32 // 默认值
+			bestTokPS := 0.0
+
+			for _, concurrency := range probeLevels {
+				if concurrency > n*2 {
+					break
+				}
+				// 每轮发 min(concurrency, 16) 个请求做快速探测
+				probeN := concurrency
+				if probeN > 16 {
+					probeN = 16
+				}
+				tokPS := probeThroughput(c, cfg, prompt, probeN, concurrency, outputLen)
+				fmt.Printf("  [bench_serving] probe concurrency=%d tok/s=%.1f\n", concurrency, tokPS)
+				probeResults = append(probeResults, probeResult{concurrency, tokPS})
+
+				if tokPS > bestTokPS*1.1 {
+					// 提升 >10%，继续探测
+					bestTokPS = tokPS
+					bestConcurrency = concurrency
+				} else if tokPS > bestTokPS {
+					// 有提升但不显著，记下并停止
+					bestTokPS = tokPS
+					bestConcurrency = concurrency
+					break
+				} else {
+					// 吞吐量下降，停止
+					break
+				}
+			}
+
+			fmt.Printf("  [bench_serving] best concurrency=%d, starting formal test with n=%d\n", bestConcurrency, n)
+
+			// 3. 用最优并发度做正式测试（semaphore 限流）
+			type reqResult struct {
+				rec client.BenchRecord
+				err error
+			}
+			results := make([]reqResult, n)
 			var wg sync.WaitGroup
-			var mu sync.Mutex
-			var totalTokens int
-			for i := 0; i < batchSize; i++ {
+			sem := make(chan struct{}, bestConcurrency)
+
+			launch := func(idx int) {
+				sem <- struct{}{}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					var r map[string]any
-					if status, err := c.JsonPost(context.Background(), "/v1/completions", map[string]any{
-						"model": cfg.Model.Name, "prompt": "Tell me a fact.", "max_tokens": 32, "temperature": 0,
-					}, &r); err == nil && status == 200 {
-						usage := r["usage"].(map[string]any)
-						mu.Lock()
-						totalTokens += int(usage["completion_tokens"].(float64))
-						mu.Unlock()
+					defer func() { <-sem }()
+					ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
+					defer cancel()
+					body := map[string]any{
+						"model":          cfg.Model.Name,
+						"messages":       []map[string]string{{"role": "user", "content": prompt}},
+						"max_tokens":     outputLen,
+						"temperature":    0,
+						"stream":         true,
+						"stream_options": map[string]bool{"include_usage": true},
 					}
+					rec, err := c.StreamBench(ctx, "/v1/chat/completions", body)
+					results[idx] = reqResult{rec, err}
 				}()
 			}
-			wg.Wait()
-			dur := time.Since(t0)
-			tps := float64(totalTokens) / dur.Seconds()
-			results = append(results, result{batchSize, dur, tps})
-		}
 
-		allZero := true
-		for _, r := range results {
-			if r.tokensPS > 0 {
-				allZero = false
-				break
+			t0 := time.Now()
+			for i := 0; i < n; i++ {
+				launch(i)
+			}
+			wg.Wait()
+			duration := time.Since(t0)
+
+			var (
+				ttftsMs, tpotsMs, itlsMs []float64
+				totalToks, completed, failed int
+			)
+			for _, r := range results {
+				if r.err != nil {
+					failed++
+					continue
+				}
+				completed++
+				rec := r.rec
+				totalToks += rec.NumTokens
+				ttftsMs = append(ttftsMs, float64(rec.TTFT.Milliseconds()))
+				if rec.NumTokens > 1 {
+					decodeMs := float64((rec.Total - rec.TTFT).Milliseconds())
+					tpotsMs = append(tpotsMs, decodeMs/float64(rec.NumTokens-1))
+				}
+				for i := 1; i < len(rec.ChunkTimes); i++ {
+					itlsMs = append(itlsMs, float64((rec.ChunkTimes[i]-rec.ChunkTimes[i-1]).Milliseconds()))
+				}
+			}
+
+			if completed == 0 {
+				return "", fmt.Errorf("all %d requests failed", n)
+			}
+
+			reqPerSec := float64(completed) / duration.Seconds()
+			tokPerSec := float64(totalToks) / duration.Seconds()
+
+			// 构建探测结果字符串
+			probeStr := "probes{"
+			for i, pr := range probeResults {
+				if i > 0 {
+					probeStr += " "
+				}
+				probeStr += fmt.Sprintf("c=%d:%.0ftok/s", pr.concurrency, pr.tokPS)
+			}
+			probeStr += fmt.Sprintf("} best_c=%d | ", bestConcurrency)
+
+			return cfgStr + probeStr + fmt.Sprintf(
+				"n=%d ok=%d fail=%d dur=%.1fs req/s=%.2f tok/s=%.1f | TTFT(ms) %s | TPOT(ms) %s | ITL(ms) %s",
+				n, completed, failed, duration.Seconds(), reqPerSec, tokPerSec,
+				benchStatLine(ttftsMs), benchStatLine(tpotsMs), benchStatLine(itlsMs),
+			), nil
+		},
+	}
+}
+
+// vllmRuntimeConfig 从 /metrics 提取的 vLLM 运行时配置
+type vllmRuntimeConfig struct {
+	GpuMemoryUtilization string
+	NumGpuBlocks         string
+	EnablePrefixCaching  string
+}
+
+// detectVllmConfig 从 /metrics 端点获取 vLLM 的 cache_config_info
+func detectVllmConfig(c *client.Client) *vllmRuntimeConfig {
+	resp, err := c.Get(context.Background(), "/metrics")
+	if err != nil || resp.Status != 200 {
+		return nil
+	}
+	for _, line := range strings.Split(string(resp.Body), "\n") {
+		if strings.HasPrefix(line, "vllm:cache_config_info{") {
+			return &vllmRuntimeConfig{
+				GpuMemoryUtilization: extractMetricLabel(line, "gpu_memory_utilization"),
+				NumGpuBlocks:         extractMetricLabel(line, "num_gpu_blocks"),
+				EnablePrefixCaching:  extractMetricLabel(line, "enable_prefix_caching"),
 			}
 		}
-		if allZero {
-			return "", fmt.Errorf("all batch requests failed, server may be unavailable")
+	}
+	return nil
+}
+
+// extractMetricLabel 从 Prometheus 指标行中提取标签值
+func extractMetricLabel(line, key string) string {
+	idx := strings.Index(line, key+"=\"")
+	if idx < 0 {
+		return "n/a"
+	}
+	start := idx + len(key) + 2
+	end := strings.Index(line[start:], "\"")
+	if end < 0 {
+		return "n/a"
+	}
+	return line[start : start+end]
+}
+
+// probeThroughput 发送 probeN 个请求（限制并发度为 concurrency），返回 tok/s
+func probeThroughput(c *client.Client, cfg *config.Config, prompt string, probeN, concurrency, outputLen int) float64 {
+	type probeResult struct {
+		rec client.BenchRecord
+		err error
+	}
+	results := make([]probeResult, probeN)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, concurrency)
+
+	for i := 0; i < probeN; i++ {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
+			defer cancel()
+			body := map[string]any{
+				"model":          cfg.Model.Name,
+				"messages":       []map[string]string{{"role": "user", "content": prompt}},
+				"max_tokens":     outputLen,
+				"temperature":    0,
+				"stream":         true,
+				"stream_options": map[string]bool{"include_usage": true},
+			}
+			rec, err := c.StreamBench(ctx, "/v1/chat/completions", body)
+			results[idx] = probeResult{rec, err}
+		}(i)
+	}
+	wg.Wait()
+
+	totalToks := 0
+	completed := 0
+	var maxTotal time.Duration
+	for _, r := range results {
+		if r.err != nil {
+			continue
 		}
-		var sb strings.Builder
-		for _, r := range results {
-			fmt.Fprintf(&sb, "batch=%d dur=%s tok/s=%.1f  ", r.batch, r.dur.Round(time.Millisecond), r.tokensPS)
+		totalToks += r.rec.NumTokens
+		completed++
+		if r.rec.Total > maxTotal {
+			maxTotal = r.rec.Total
 		}
-		return strings.TrimSpace(sb.String()), nil
-	}}
+	}
+	if maxTotal <= 0 {
+		return 0
+	}
+	return float64(totalToks) / maxTotal.Seconds()
 }

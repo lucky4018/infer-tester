@@ -7,9 +7,19 @@
   "model": {
     "name": "qwen"
   },
+  "vllm_bench": {
+    "image": "vllm-ascend:v0.20.2rc",
+    "args": "--backend openai-chat --endpoint /v1/chat/completions --dataset-name random --num-prompts 200 --random-input-len 512 --random-output-len 128 --ignore-eos",
+    "tokenizer": "/home/la/work/vllm-project/models/Eco-Tech/Qwen3___5-35B-A3B-w8a8-mtp",
+    "model_dir": "/home/la/work/vllm-project/models"
+  },
   "performance": {
     "latency_requests": 5,
-    "throughput_duration_seconds": 15
+    "throughput_duration_seconds": 15,
+    "bench_num_prompts": 100,
+    "bench_request_rate": 0,
+    "bench_input_len": 512,
+    "bench_output_len": 128
   },
   "concurrency": {
     "num_requests": 16
@@ -51,18 +61,21 @@
       "reasoning_thinking": true,
       "multimodal_image": true
     },
-    "performance": {
-      "latency_ttft": true,
-      "throughput_tokens": true,
-      "latency_single_request": true,
-      "prefix_caching_speedup": true,
-      "batch_scaling": true
-    },
     "concurrency": {
       "concurrent_requests": true,
       "continuous_batching_mixed": true,
       "preemption_short_wins": true,
       "cancellation_mid_stream": true
+    },
+    "performance": {
+      "latency_ttft": true,
+      "throughput_tokens": true,
+      "latency_single_request": true,
+      "prefix_caching_speedup": true,
+      "bench_serving": true
+    },
+    "vllm_bench": {
+      "vllm_bench_serve": true
     }
   },
   "output": {
